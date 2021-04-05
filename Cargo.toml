@@ -5,4 +5,14 @@ authors = ["TechnoElf <technoelf@undertheprinter.com>"]
 edition = "2018"
 
 [dependencies]
+velcro = "0.5.3"
+openapi = { git = "https://github.com/softprops/openapi" }
+mysql = { git = "https://github.com/TechnoElf/rust-mysql-simple", features = ["tls-rust"] }
 rocket = "0.4.7"
+rocket_contrib = { version = "0.4.7", default-features = false, features = ["json"] }
+websocket = { version = "0.26.2", default_features = false, features = ["sync"] }
+serde = "1.0.125"
+base64 = "0.13.0"
+rand_core = "0.6.2"
+argon2 = { version = "0.1.4", features = ["std"] }
+uuid = { version = "0.8.2", features = ["v4"] }
