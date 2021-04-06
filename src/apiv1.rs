@@ -1,23 +1,21 @@
+use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
 
 use mysql::Conn;
-
-use velcro::btree_map;
-
-use rocket::{State, Request};
-use rocket::response::{Redirect, status};
-use rocket::http::Status;
-use rocket_contrib::json::Json;
-
 use openapi::v3_0::*;
-
+use rocket::{State, Request};
+use rocket::http::Status;
+use rocket::response::{Redirect, status};
+use rocket_contrib::json::Json;
 use uuid::Uuid;
+use velcro::btree_map;
 
 use crate::model::*;
 use crate::auth::*;
 
 type ApiResp<T> = Result<Json<T>, Status>;
 type DbConn = Arc<Mutex<Conn>>;
+type Conf = HashMap<String, String>;
 
 #[get("/")]
 fn index() -> Redirect {
@@ -283,9 +281,9 @@ fn server_error(req: &Request) {
     println!("{:?}", req);
 }
 
-pub fn run(db_conn: DbConn) {
+pub fn run(db_conn: DbConn, conf: Conf) {
     rocket::ignite()
         .mount("/", routes![index, root, stations_post, station_get, station_put, data_get, data_post, state_get, state_put, users_post, user_get, user_put, user_stations_get, user_stations_post])
         .register(catchers![unauthorised, not_found, server_error])
-        .manage(db_conn).launch();
+        .manage(db_conn).manage(conf).launch();
 }

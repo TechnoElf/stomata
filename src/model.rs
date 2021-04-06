@@ -2,8 +2,8 @@ use std::time::SystemTime;
 
 use mysql::Conn;
 use mysql::prelude::Queryable;
-use serde::{Deserialize, Serialize};
 use rocket::http::Status;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct UserRow {

@@ -1,12 +1,10 @@
+use argon2::Argon2;
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use base64;
+use rand_core::OsRng;
+use rocket::Outcome;
 use rocket::http::Status;
 use rocket::request::{self, FromRequest, Request};
-use rocket::Outcome;
-
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use argon2::Argon2;
-use rand_core::OsRng;
-
-use base64;
 
 #[derive(Debug)]
 pub struct BasicAuth {
