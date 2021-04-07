@@ -131,12 +131,16 @@ fn root() -> status::Custom<Json<Spec>> {
 #[post("/v1/stations", data = "<req>")]
 fn stations_post(req: Json<StationsReq>, db: State<DbConn>) -> ApiResp<StationsResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?;
-    let token = Uuid::new_v4().to_simple().encode_lower(&mut Uuid::encode_buffer()).to_string();
-    let hash = BasicAuth::from_parts(&req.id.to_string(), &token).hash();
-    add_station(req.id, &req.name, &hash, &mut db)?;
-    Ok(Json(StationsResp {
-        token
-    }))
+    if get_station(req.id, &mut db).is_err() {
+        let token = Uuid::new_v4().to_simple().encode_lower(&mut Uuid::encode_buffer()).to_string();
+        let hash = BasicAuth::from_parts(&req.id.to_string(), &token).hash();
+        add_station(req.id, &req.name, &hash, &mut db)?;
+        Ok(Json(StationsResp {
+            token
+        }))
+    } else {
+        Err(Status::Conflict)
+    }
 }
 
 #[get("/v1/stations/<id>")]
@@ -285,23 +289,23 @@ fn user_stations_post(name: String, req: Json<UserStationsReq>, db: State<DbConn
 }
 
 #[catch(401)] 
-fn unauthorised(req: &Request) {
-    println!("{:?}", req);
-}
+fn unauthorised(_req: &Request) {}
 
 #[catch(404)] 
-fn not_found(req: &Request) {
-    println!("{:?}", req);
-}
+fn not_found(_req: &Request) {}
+
+#[catch(409)] 
+fn conflict(_req: &Request) {}
+
+#[catch(422)] 
+fn unprocessable(_req: &Request) {}
 
 #[catch(500)] 
-fn server_error(req: &Request) {
-    println!("{:?}", req);
-}
+fn server_error(_req: &Request) {}
 
 pub fn run(db_conn: DbConn, conf: Conf) {
     rocket::ignite()
         .mount("/", routes![index, root, stations_post, station_get, station_put, data_get, data_post, state_get, state_put, users_post, user_get, user_put, user_stations_get, user_stations_post])
-        .register(catchers![unauthorised, not_found, server_error])
+        .register(catchers![unauthorised, not_found, conflict, unprocessable, server_error])
         .manage(db_conn).manage(conf).launch();
 }
