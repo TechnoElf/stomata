@@ -26,7 +26,6 @@ use rocket::http::Status;
 use rocket::response::{Redirect, status};
 use rocket_contrib::json::Json;
 use uuid::Uuid;
-use velcro::btree_map;
 
 use crate::model::*;
 use crate::auth::*;
@@ -53,77 +52,6 @@ fn root() -> status::Custom<Json<Spec>> {
             url: "https://stomata.undertheprinter.com/v1".to_string(),
             .. Default::default()
         }]),
-        paths: btree_map!{
-            "/stations".to_string(): PathItem {
-                post: Some(Operation {
-                    summary: Some("Register a station (station side)".to_string()),
-                    .. Default::default()
-                }),
-                .. Default::default()
-            },
-            "/stations/{id}".to_string(): PathItem {
-                get: Some(Operation {
-                    summary: Some("Retrieve station data".to_string()),
-                    .. Default::default()
-                }),
-                put: Some(Operation {
-                    summary: Some("Modify station data".to_string()),
-                    .. Default::default()
-                }),
-                .. Default::default()
-            },
-            "/stations/{id}/data".to_string(): PathItem {
-                get: Some(Operation {
-                    summary: Some("Retrieve sensor data".to_string()),
-                    .. Default::default()
-                }),
-                post: Some(Operation {
-                    summary: Some("Record sensor data".to_string()),
-                    .. Default::default()
-                }),
-                .. Default::default()
-            },
-            "/stations/{id}/status".to_string(): PathItem {
-                get: Some(Operation {
-                    summary: Some("Retrieve station status".to_string()),
-                    .. Default::default()
-                }),
-                put: Some(Operation {
-                    summary: Some("Modify station status".to_string()),
-                    .. Default::default()
-                }),
-                .. Default::default()
-            },
-            "/users".to_string(): PathItem {
-                post: Some(Operation {
-                    summary: Some("Register a user".to_string()),
-                    .. Default::default()
-                }),
-                .. Default::default()
-            },
-            "/users/{name}".to_string(): PathItem {
-                get: Some(Operation {
-                    summary: Some("Retrieve user data".to_string()),
-                    .. Default::default()
-                }),
-                put: Some(Operation {
-                    summary: Some("Modify user data".to_string()),
-                    .. Default::default()
-                }),
-                .. Default::default()
-            },
-            "/users/{name}/stations".to_string(): PathItem {
-                get: Some(Operation {
-                    summary: Some("List a users' registered stations".to_string()),
-                    .. Default::default()
-                }),
-                post: Some(Operation {
-                    summary: Some("Register a station (user side)".to_string()),
-                    .. Default::default()
-                }),
-                .. Default::default()
-            },
-        },
         .. Default::default()
     }))
 }
@@ -179,7 +107,9 @@ fn data_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<DataResp> 
         Ok(Json(DataResp {
             data: data.into_iter().map(|d| DataElement {
                 time: d.time,
-                val: d.val
+                moisture: d.moisture,
+                temperature: d.temperature,
+                tank_empty: d.tank_empty
             }).collect()
         }))
     } else {
@@ -192,7 +122,7 @@ fn data_post(id: usize, req: Json<DataReq>, db: State<DbConn>, auth: BasicAuth) 
     let mut db = db.lock().or(Err(Status::InternalServerError))?;
     let station = get_station(id, &mut db)?;
     if auth.verify(&station.token) {
-        add_data(station.id, req.val, &mut db)?;
+        add_data(station.id, req.moisture, req.temperature, req.tank_empty, &mut db)?;
         Ok(Json(EmptyResp {}))
     } else {
         Err(Status::Unauthorized)
@@ -228,29 +158,32 @@ fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, auth: BasicAuth)
 #[post("/v1/users", data = "<req>")]
 fn users_post(req: Json<UsersReq>, db: State<DbConn>) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?;
-    let hash = BasicAuth::from_parts(&req.name, &req.pass).hash();
-    add_user(&req.name, &hash, &mut db)?;
+    let hash = BasicAuth::from_parts(&req.login, &req.pass).hash();
+    add_user(&req.login, &req.name, &hash, &mut db)?;
     Ok(Json(EmptyResp {}))
 }
 
-#[get("/v1/users/<name>")]
-fn user_get(name: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserResp> {
+#[get("/v1/users/<login>")]
+fn user_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?;
-    let user = get_user(&name, &mut db)?;
+    let user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
-        Ok(Json(UserResp {}))
+        Ok(Json(UserResp {
+            name: user.name
+        }))
     } else {
         Err(Status::Unauthorized)
     }
 }
 
-#[put("/v1/users/<name>", data = "<req>")]
-fn user_put(name: String, req: Json<UserReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+#[put("/v1/users/<login>", data = "<req>")]
+fn user_put(login: String, req: Json<UserReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?;
-    let mut user = get_user(&name, &mut db)?;
+    let mut user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
-        let pass_hash = BasicAuth::from_parts(&user.name, &req.pass).hash();
+        let pass_hash = BasicAuth::from_parts(&user.login, &req.pass).hash();
         user.pass = pass_hash;
+        user.name = req.name.clone();
         update_user(user, &mut db)?;
         Ok(Json(EmptyResp {}))
     } else {
@@ -258,12 +191,12 @@ fn user_put(name: String, req: Json<UserReq>, db: State<DbConn>, auth: BasicAuth
     }
 }
 
-#[get("/v1/users/<name>/stations")]
-fn user_stations_get(name: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserStationsResp> {
+#[get("/v1/users/<login>/stations")]
+fn user_stations_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserStationsResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?;
-    let user = get_user(&name, &mut db)?;
+    let user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
-        let stations = get_stations(&name, &mut db)?;
+        let stations = get_stations(&login, &mut db)?;
         Ok(Json(UserStationsResp {
             stations: stations.into_iter().map(|s| s.id).collect()
         }))
@@ -272,14 +205,14 @@ fn user_stations_get(name: String, db: State<DbConn>, auth: BasicAuth) -> ApiRes
     }
 }
 
-#[post("/v1/users/<name>/stations", data = "<req>")]
-fn user_stations_post(name: String, req: Json<UserStationsReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+#[post("/v1/users/<login>/stations", data = "<req>")]
+fn user_stations_post(login: String, req: Json<UserStationsReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?;
-    let user = get_user(&name, &mut db)?;
+    let user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
         let mut station = get_station(req.id, &mut db)?;
         if station.owner.is_none() {
-            station.owner = Some(name.clone());
+            station.owner = Some(user.login);
             update_station(station, &mut db)?;
         }
         Ok(Json(EmptyResp {}))

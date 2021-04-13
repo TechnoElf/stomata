@@ -5,6 +5,6 @@ let
   };
 in with pkgs; pkgs.mkShell {
   buildInputs = [
-    (rustChannelOfTargets "nightly" "2021-03-13" [ "x86_64-unknown-linux-gnu" ])
+    (rustChannelOfTargets "nightly" "2021-04-10" [ "x86_64-unknown-linux-gnu" ])
   ];
 }
