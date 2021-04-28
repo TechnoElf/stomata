@@ -16,17 +16,18 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use argon2::Argon2;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use std::num::NonZeroU32;
+
 use base64;
-use rand_core::OsRng;
+use ring::{digest, pbkdf2};
 use rocket::Outcome;
 use rocket::http::Status;
 use rocket::request::{self, FromRequest, Request};
 
 #[derive(Debug)]
 pub struct BasicAuth {
-    pub creds: String,
+    pub user: String,
+    pub pass: String
 }
 
 impl BasicAuth {
@@ -35,25 +36,30 @@ impl BasicAuth {
             return None;
         }
 
-        let creds = match base64::decode(&header[6..]) {
-            Ok(creds) => String::from_utf8(creds).unwrap(),
-            Err(_) => return None,
-        };
-
-        Some(Self { creds })
+        if let Ok(Ok(creds)) = base64::decode(&header[6..]).map(String::from_utf8) {
+            if let Some((user, pass)) = creds.split_once(':') {
+                return Some(Self { user: user.to_string(), pass: pass.to_string() })
+            }
+        }
+        None
     }
 
     pub fn from_parts(user: &str, pass: &str) -> Self {
-        Self { creds: format!("{}:{}", user, pass) }
+        Self { user: user.to_string(), pass: pass.to_string() }
     }
 
     pub fn hash(&self) -> String {
-        Argon2::default().hash_password_simple(self.creds.as_bytes(), SaltString::generate(&mut OsRng).as_ref())
-            .unwrap().to_string()
+        let mut hash = [0u8; digest::SHA256_OUTPUT_LEN];
+        pbkdf2::derive(pbkdf2::PBKDF2_HMAC_SHA256, NonZeroU32::new(100000).unwrap(), self.user.as_bytes(), self.pass.as_bytes(), &mut hash);
+        base64::encode(hash)
     }
 
     pub fn verify(&self, hash: &str) -> bool {
-        Argon2::default().verify_password(self.creds.as_bytes(), &PasswordHash::new(hash).unwrap()).is_ok()
+        if let Ok(hash) = base64::decode(hash) {
+            pbkdf2::verify(pbkdf2::PBKDF2_HMAC_SHA256, NonZeroU32::new(100000).unwrap(), self.user.as_bytes(), self.pass.as_bytes(), &hash).is_ok()
+        } else {
+            false
+        }
     }
 }
 

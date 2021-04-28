@@ -18,12 +18,13 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
+use std::path::PathBuf;
 
 use mysql::Conn;
 use openapi::v3_0::*;
 use rocket::{State, Request};
 use rocket::http::Status;
-use rocket::response::{Redirect, status};
+use rocket::response::Redirect;
 use rocket_contrib::json::Json;
 use uuid::Uuid;
 
@@ -39,9 +40,12 @@ fn index() -> Redirect {
     Redirect::to(uri!(root))
 }
 
+#[options("/<_path..>")]
+fn options(_path: PathBuf) {}
+
 #[get("/v1")]
-fn root() -> status::Custom<Json<Spec>> {
-    status::Custom(Status::ImATeapot, Json(Spec {
+fn root() -> Json<Spec> {
+    Json(Spec {
         openapi: "3.1.0".to_string(),
         info: Info {
             title: "Thyme API / Stomata".to_string(),
@@ -53,7 +57,7 @@ fn root() -> status::Custom<Json<Spec>> {
             .. Default::default()
         }]),
         .. Default::default()
-    }))
+    })
 }
 
 #[post("/v1/stations", data = "<req>")]
@@ -221,6 +225,9 @@ fn user_stations_post(login: String, req: Json<UserStationsReq>, db: State<DbCon
     }
 }
 
+#[catch(400)] 
+fn bad_request(_req: &Request) {}
+
 #[catch(401)] 
 fn unauthorised(_req: &Request) {}
 
@@ -238,7 +245,7 @@ fn server_error(_req: &Request) {}
 
 pub fn run(db_conn: DbConn, conf: Conf) {
     rocket::ignite()
-        .mount("/", routes![index, root, stations_post, station_get, station_put, data_get, data_post, state_get, state_put, users_post, user_get, user_put, user_stations_get, user_stations_post])
-        .register(catchers![unauthorised, not_found, conflict, unprocessable, server_error])
+        .mount("/", routes![index, options, root, stations_post, station_get, station_put, data_get, data_post, state_get, state_put, users_post, user_get, user_put, user_stations_get, user_stations_post])
+        .register(catchers![bad_request, unauthorised, not_found, conflict, unprocessable, server_error])
         .manage(db_conn).manage(conf).launch();
 }
