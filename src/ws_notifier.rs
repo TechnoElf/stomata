@@ -19,14 +19,14 @@
 use std::thread;
 use std::sync::{Mutex, Arc};
 
-use mysql::Conn;
+use mysql::Pool;
 
 use websocket::sync::Server;
 use websocket::OwnedMessage;
 
 const WS_PORT: usize = 8001;
 
-pub fn run(_db_conn: Arc<Mutex<Conn>>) {
+pub fn run(_db_conn: Arc<Mutex<Pool>>) {
     let server = Server::bind(format!("0.0.0.0:{}", WS_PORT)).unwrap();
     println!("[WS]: Started");
     for request in server.filter_map(Result::ok) {

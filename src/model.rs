@@ -18,7 +18,7 @@
 
 use std::time::SystemTime;
 
-use mysql::Conn;
+use mysql::PooledConn;
 use mysql::prelude::Queryable;
 use rocket::http::Status;
 use serde::{Deserialize, Serialize};
@@ -48,49 +48,51 @@ pub struct DataRow {
     pub tank_empty: bool
 }
 
-pub fn create_tables(db: &mut Conn) {
+pub fn create_tables(db: &mut PooledConn) {
     db.query_drop("CREATE TABLE IF NOT EXISTS users (login TEXT NOT NULL, name TEXT NOT NULL, pass TEXT NOT NULL)").unwrap();
     db.query_drop("CREATE TABLE IF NOT EXISTS stations (id INT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, owner TEXT, token TEXT NOT NULL)").unwrap();
     db.query_drop("CREATE TABLE IF NOT EXISTS data (station INT NOT NULL, time INT NOT NULL, moisture INT NOT NULL, temperature FLOAT NOT NULL, tank_empty BOOL NOT NULL)").unwrap();
 }
 
-pub fn get_user(login: &str, db: &mut Conn) -> Result<UserRow, Status> {
-    Ok(db.exec_first("SELECT * FROM users WHERE login = ?", (login,)).or(Err(Status::InternalServerError))?
+pub fn get_user(login: &str, db: &mut PooledConn) -> Result<UserRow, Status> {
+    let res = db.exec_first("SELECT * FROM users WHERE login = ?", (login,));
+    println!("{:?}", res);
+    Ok(res.or(Err(Status::InternalServerError))?
         .map(|(login, name, pass)| UserRow { login, name, pass }).ok_or(Status::NotFound)?)
 }
 
-pub fn get_station(id: usize, db: &mut Conn) -> Result<StationRow, Status> {
+pub fn get_station(id: usize, db: &mut PooledConn) -> Result<StationRow, Status> {
     Ok(db.exec_first("SELECT * FROM stations WHERE id = ?", (id,)).or(Err(Status::InternalServerError))?
         .map(|(id, name, state, owner, token)| StationRow { id, name, state, owner, token }).ok_or(Status::NotFound)?)
 }
 
-pub fn get_stations(owner: &str, db: &mut Conn) -> Result<Vec<StationRow>, Status> {
+pub fn get_stations(owner: &str, db: &mut PooledConn) -> Result<Vec<StationRow>, Status> {
     Ok(db.exec("SELECT * FROM stations WHERE owner = ?", (owner,)).or(Err(Status::InternalServerError))?
         .into_iter().map(|(id, name, state, owner, token)| StationRow { id, name, state, owner, token }).collect())
 }
 
-pub fn get_data(station: usize, db: &mut Conn) -> Result<Vec<DataRow>, Status> {
+pub fn get_data(station: usize, db: &mut PooledConn) -> Result<Vec<DataRow>, Status> {
     Ok(db.exec("SELECT * FROM data WHERE station = ?", (station,)).or(Err(Status::InternalServerError))?
         .into_iter().map(|(station, time, moisture, temperature, tank_empty)| DataRow { station, time, moisture, temperature, tank_empty }).collect())
 }
 
-pub fn update_user(user: UserRow, db: &mut Conn) -> Result<(), Status> {
+pub fn update_user(user: UserRow, db: &mut PooledConn) -> Result<(), Status> {
     Ok(db.exec_drop("UPDATE users SET name = ?, pass = ? WHERE login = ?", (&user.name, &user.pass, &user.login)).or(Err(Status::InternalServerError))?)
 }
 
-pub fn update_station(station: StationRow, db: &mut Conn) -> Result<(), Status> {
+pub fn update_station(station: StationRow, db: &mut PooledConn) -> Result<(), Status> {
     Ok(db.exec_drop("UPDATE stations SET name = ?, state = ?, owner = ?, token = ? WHERE id = ?", (&station.name, &station.state, &station.owner, &station.token, station.id)).or(Err(Status::InternalServerError))?)
 }
 
-pub fn add_user(login: &str, name: &str, pass: &str, db: &mut Conn) -> Result<(), Status> {
+pub fn add_user(login: &str, name: &str, pass: &str, db: &mut PooledConn) -> Result<(), Status> {
     Ok(db.exec_drop("INSERT INTO users (login, name, pass) VALUES (?, ?, ?)", (login, name, pass)).or(Err(Status::InternalServerError))?)
 }
 
-pub fn add_station(id: usize, name: &str, token: &str, db: &mut Conn) -> Result<(), Status> {
+pub fn add_station(id: usize, name: &str, token: &str, db: &mut PooledConn) -> Result<(), Status> {
     Ok(db.exec_drop("INSERT INTO stations (id, name, state, token) VALUES (?, ?, ?, ?)", (id, name, "idle", token)).or(Err(Status::InternalServerError))?)
 }
 
-pub fn add_data(station: usize, moisture: isize, temperature: f32, tank_empty: bool, db: &mut Conn) -> Result<(), Status> {
+pub fn add_data(station: usize, moisture: isize, temperature: f32, tank_empty: bool, db: &mut PooledConn) -> Result<(), Status> {
     Ok(db.exec_drop("INSERT INTO data (station, time, moisture, temperature, tank_empty) VALUES (?, ?, ?, ?, ?)", (station, SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), moisture, temperature, tank_empty)).or(Err(Status::InternalServerError))?)
 }
 

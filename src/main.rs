@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
 
 use mysql::prelude::*;
-use mysql::{OptsBuilder, Conn};
+use mysql::*;
 
 #[macro_use] extern crate rocket;
 
@@ -43,23 +43,25 @@ fn main() {
     let db_opts = OptsBuilder::new()
         .ip_or_hostname(Some(&conf["db_host"]))
         .user(Some(&conf["db_user"]))
-        .pass(Some(&conf["db_pass"]));
-    let mut db = Conn::new(db_opts).unwrap();
+        .pass(Some(&conf["db_pass"]))
+        .db_name(Some(&conf["db_name"]));
+    let db = Pool::new(db_opts).unwrap();
+    
+    let mut conn = db.get_conn().unwrap();
+    //conn.query_drop(&format!("CREATE DATABASE IF NOT EXISTS {}", &conf["db_name"])).unwrap();
+    //conn.query_drop(&format!("USE {}", &conf["db_name"])).unwrap();
+    model::create_tables(&mut conn);
 
-    db.query_drop(&format!("CREATE DATABASE IF NOT EXISTS {}", &conf["db_name"])).unwrap();
-    db.query_drop(&format!("USE {}", &conf["db_name"])).unwrap();
-    model::create_tables(&mut db);
+    let db = Arc::new(Mutex::new(db));
 
-    let db_conn = Arc::new(Mutex::new(db));
-
-    let db = db_conn.clone();
+    let db_http = db.clone();
     let http_server = thread::spawn(move || {
-        apiv1::run(db, conf);
+        apiv1::run(db_http, conf);
     });
 
-    let db = db_conn.clone();
+    let db_ws = db.clone();
     let ws_server = thread::spawn(move || {
-        ws_notifier::run(db);
+        ws_notifier::run(db_ws);
     });
 
     http_server.join().unwrap();

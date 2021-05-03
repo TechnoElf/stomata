@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
 use std::path::PathBuf;
 
-use mysql::Conn;
+use mysql::Pool;
 use openapi::v3_0::*;
 use rocket::{State, Request};
 use rocket::http::Status;
@@ -32,7 +32,7 @@ use crate::model::*;
 use crate::auth::*;
 
 type ApiResp<T> = Result<Json<T>, Status>;
-type DbConn = Arc<Mutex<Conn>>;
+type DbConn = Arc<Mutex<Pool>>;
 type Conf = HashMap<String, String>;
 
 #[get("/")]
@@ -62,7 +62,7 @@ fn root() -> Json<Spec> {
 
 #[post("/v1/stations", data = "<req>")]
 fn stations_post(req: Json<StationsReq>, db: State<DbConn>) -> ApiResp<StationsResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     if get_station(req.id, &mut db).is_err() {
         let token = Uuid::new_v4().to_simple().encode_lower(&mut Uuid::encode_buffer()).to_string();
         let hash = BasicAuth::from_parts(&req.id.to_string(), &token).hash();
@@ -77,7 +77,7 @@ fn stations_post(req: Json<StationsReq>, db: State<DbConn>) -> ApiResp<StationsR
 
 #[get("/v1/stations/<id>")]
 fn station_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StationResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let station = get_station(id, &mut db)?;
     if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
         Ok(Json(StationResp {
@@ -91,7 +91,7 @@ fn station_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<Station
 
 #[put("/v1/stations/<id>", data = "<req>")]
 fn station_put(id: usize, req: Json<StationReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let mut station = get_station(id, &mut db)?;
     if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
         station.name = req.name.clone();
@@ -104,7 +104,7 @@ fn station_put(id: usize, req: Json<StationReq>, db: State<DbConn>, auth: BasicA
 
 #[get("/v1/stations/<id>/data")]
 fn data_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<DataResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let station = get_station(id, &mut db)?;
     if station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
         let data = get_data(station.id, &mut db)?;
@@ -123,7 +123,7 @@ fn data_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<DataResp> 
 
 #[post("/v1/stations/<id>/data", data = "<req>")]
 fn data_post(id: usize, req: Json<DataReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let station = get_station(id, &mut db)?;
     if auth.verify(&station.token) {
         add_data(station.id, req.moisture, req.temperature, req.tank_empty, &mut db)?;
@@ -135,7 +135,7 @@ fn data_post(id: usize, req: Json<DataReq>, db: State<DbConn>, auth: BasicAuth) 
 
 #[get("/v1/stations/<id>/state")]
 fn state_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StateResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let station = get_station(id, &mut db)?;
     if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
         Ok(Json(StateResp {
@@ -148,7 +148,7 @@ fn state_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StateResp
 
 #[put("/v1/stations/<id>/state", data = "<req>")]
 fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let mut station = get_station(id, &mut db)?;
     if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
         station.state = req.state.clone();
@@ -161,7 +161,7 @@ fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, auth: BasicAuth)
 
 #[post("/v1/users", data = "<req>")]
 fn users_post(req: Json<UsersReq>, db: State<DbConn>) -> ApiResp<EmptyResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let hash = BasicAuth::from_parts(&req.login, &req.pass).hash();
     add_user(&req.login, &req.name, &hash, &mut db)?;
     Ok(Json(EmptyResp {}))
@@ -169,7 +169,11 @@ fn users_post(req: Json<UsersReq>, db: State<DbConn>) -> ApiResp<EmptyResp> {
 
 #[get("/v1/users/<login>")]
 fn user_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let res = db.lock();
+    println!("{:?}", res);
+    let res = res.or(Err(Status::InternalServerError))?.get_conn();
+    println!("{:?}", res);
+    let mut db = res.or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
         Ok(Json(UserResp {
@@ -182,7 +186,7 @@ fn user_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserRe
 
 #[put("/v1/users/<login>", data = "<req>")]
 fn user_put(login: String, req: Json<UserReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let mut user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
         let pass_hash = BasicAuth::from_parts(&user.login, &req.pass).hash();
@@ -197,7 +201,7 @@ fn user_put(login: String, req: Json<UserReq>, db: State<DbConn>, auth: BasicAut
 
 #[get("/v1/users/<login>/stations")]
 fn user_stations_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserStationsResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
         let stations = get_stations(&login, &mut db)?;
@@ -211,7 +215,7 @@ fn user_stations_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiRe
 
 #[post("/v1/users/<login>/stations", data = "<req>")]
 fn user_stations_post(login: String, req: Json<UserStationsReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
         let mut station = get_station(req.id, &mut db)?;

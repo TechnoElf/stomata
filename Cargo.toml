@@ -13,5 +13,6 @@ ring = "0.16.20"
 rocket = "0.4.7"
 rocket_contrib = { version = "0.4.7", default-features = false, features = ["json"] }
 serde = "1.0.125"
+serde_json = "1.0.59"
 uuid = { version = "0.8.2", features = ["v4"] }
 websocket = { version = "0.26.2", default_features = false, features = ["sync"] }
