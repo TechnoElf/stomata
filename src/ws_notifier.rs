@@ -16,45 +16,87 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::thread;
 use std::sync::{Mutex, Arc};
+use std::net::SocketAddr;
 
 use mysql::Pool;
-
-use websocket::sync::Server;
+use serde::{Deserialize, Serialize};
+use serde_json;
+use websocket::sync::{Server, Client, stream::TcpStream};
 use websocket::OwnedMessage;
 
 const WS_PORT: usize = 8001;
 
 pub fn run(_db_conn: Arc<Mutex<Pool>>) {
-    let server = Server::bind(format!("0.0.0.0:{}", WS_PORT)).unwrap();
+    let mut server = Server::bind(format!("0.0.0.0:{}", WS_PORT)).unwrap();
+    server.set_nonblocking(true).unwrap();
     println!("[WS]: Started");
-    for request in server.filter_map(Result::ok) {
-        thread::spawn(|| {
-            let client = request.accept().unwrap();
-            let addr = client.peer_addr().unwrap();
-            println!("[WS]: Connection from {}", addr);
-            let (mut recv, mut send) = client.split().unwrap();
 
-            for message in recv.incoming_messages() {
-                if let Ok(message) = message {
-                    match message {
-                        OwnedMessage::Close(_) => {
-                            let message = OwnedMessage::Close(None);
-                            send.send_message(&message).unwrap();
-                            println!("[WS]: Client {} disconnected", addr);
-                            break;
-                        }
-                        OwnedMessage::Ping(ping) => {
-                            let message = OwnedMessage::Pong(ping);
-                            send.send_message(&message).unwrap();
-                        }
-                        _ => send.send_message(&message).unwrap(),
+    let mut stations: Vec<Station> = Vec::new();
+
+    loop {
+        if let Ok(request) = server.accept() {
+            let cli = request.accept().unwrap();
+            let addr = cli.peer_addr().unwrap();
+            stations.push(Station {
+                cli,
+                addr,
+                id: None,
+                token: None
+            });
+            println!("[WS]: Connection from {}", addr);
+        }
+
+        for station in stations.iter_mut() {
+            if let Ok(msg) = station.cli.recv_message() {
+                match msg {
+                    OwnedMessage::Close(_) => {
+                        let msg = OwnedMessage::Close(None);
+                        station.cli.send_message(&msg).unwrap();
+                        println!("[WS]: {} disconnected", station.addr);
                     }
-                } else {
-                    break;
+                    OwnedMessage::Ping(ping) => {
+                        let msg = OwnedMessage::Pong(ping);
+                        station.cli.send_message(&msg).unwrap();
+                    }
+                    OwnedMessage::Text(data) => {
+                        println!("[WS]: Received message from {}: {}", station.addr, data);
+                        if station.id.is_some() {
+                                let msg = serde_json::to_string(&StateMessage {
+                                    state: "idle".to_string()
+                                }).unwrap();
+                                let msg = OwnedMessage::Text(msg);
+                                station.cli.send_message(&msg).unwrap();
+                        } else {
+                            if let Ok(reg) = serde_json::from_str::<RegisterMessage>(&data) {
+                                station.id = Some(reg.id);
+                                station.token = Some(reg.token);
+                                let msg = OwnedMessage::Text("{}".to_string());
+                                station.cli.send_message(&msg).unwrap();
+                            }
+                        }
+                    }
+                    _ => (),
                 }
             }
-        });
+        }
     }
+}
+
+struct Station {
+    cli: Client<TcpStream>,
+    addr: SocketAddr,
+    id: Option<usize>,
+    token: Option<String>
+}
+
+#[derive(Debug, Deserialize)]
+struct RegisterMessage {
+    id: usize,
+    token: String
+}
+
+#[derive(Debug, Serialize)]
+struct StateMessage {
+    state: String
 }

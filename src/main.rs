@@ -23,7 +23,6 @@ use std::thread;
 use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
 
-use mysql::prelude::*;
 use mysql::*;
 
 #[macro_use] extern crate rocket;
