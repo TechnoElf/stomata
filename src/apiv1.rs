@@ -65,6 +65,7 @@ fn root() -> Json<Spec> {
 #[post("/v1/stations", data = "<req>")]
 fn stations_post(req: Json<StationsReq>, db: State<DbConn>) -> ApiResp<StationsResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
+
     if get_station(req.id, &mut db).is_err() {
         let token = Uuid::new_v4().to_simple().encode_lower(&mut Uuid::encode_buffer()).to_string();
         let hash = BasicAuth::from_parts(&req.id.to_string(), &token).hash();
@@ -81,7 +82,8 @@ fn stations_post(req: Json<StationsReq>, db: State<DbConn>) -> ApiResp<StationsR
 fn station_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StationResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let station = get_station(id, &mut db)?;
-    if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
+
+    if auth.verify(&station.token) {
         Ok(Json(StationResp {
             name: station.name,
             owner: station.owner
@@ -95,29 +97,11 @@ fn station_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<Station
 fn station_put(id: usize, req: Json<StationReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let mut station = get_station(id, &mut db)?;
-    if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
+
+    if auth.verify(&station.token) {
         station.name = req.name.clone();
         update_station(station, &mut db)?;
         Ok(Json(EmptyResp {}))
-    } else {
-        Err(Status::Unauthorized)
-    }
-}
-
-#[get("/v1/stations/<id>/data")]
-fn data_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<DataResp> {
-    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
-    let station = get_station(id, &mut db)?;
-    if station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
-        let data = get_data(station.id, &mut db)?;
-        Ok(Json(DataResp {
-            data: data.into_iter().map(|d| DataElement {
-                time: d.time,
-                moisture: d.moisture,
-                temperature: d.temperature,
-                tank_empty: d.tank_empty
-            }).collect()
-        }))
     } else {
         Err(Status::Unauthorized)
     }
@@ -127,6 +111,7 @@ fn data_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<DataResp> 
 fn data_post(id: usize, req: Json<DataReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let station = get_station(id, &mut db)?;
+
     if auth.verify(&station.token) {
         add_data(station.id, req.moisture, req.temperature, req.tank_empty, &mut db)?;
         Ok(Json(EmptyResp {}))
@@ -139,7 +124,8 @@ fn data_post(id: usize, req: Json<DataReq>, db: State<DbConn>, auth: BasicAuth) 
 fn state_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StateResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let station = get_station(id, &mut db)?;
-    if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
+
+    if auth.verify(&station.token) {
         Ok(Json(StateResp {
             state: station.state
         }))
@@ -149,16 +135,11 @@ fn state_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StateResp
 }
 
 #[put("/v1/stations/<id>/state", data = "<req>")]
-fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, ws_reqs: State<WsRequests>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let mut station = get_station(id, &mut db)?;
-    if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
-        let mut ws_reqs = ws_reqs.lock().or(Err(Status::InternalServerError))?;
-        ws_reqs.push(WsRequest::UpdateState(WsUpdateState {
-            id: station.id,
-            state: req.state.clone()
-        }));
 
+    if auth.verify(&station.token) {
         station.state = req.state.clone();
         update_station(station, &mut db)?;
 
@@ -180,6 +161,7 @@ fn users_post(req: Json<UsersReq>, db: State<DbConn>) -> ApiResp<EmptyResp> {
 fn user_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
+
     if auth.verify(&user.pass) {
         Ok(Json(UserResp {
             name: user.name
@@ -193,6 +175,7 @@ fn user_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserRe
 fn user_put(login: String, req: Json<UserReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let mut user = get_user(&login, &mut db)?;
+
     if auth.verify(&user.pass) {
         let pass_hash = BasicAuth::from_parts(&user.login, &req.pass).hash();
         user.pass = pass_hash;
@@ -208,6 +191,7 @@ fn user_put(login: String, req: Json<UserReq>, db: State<DbConn>, auth: BasicAut
 fn user_stations_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserStationsResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
+
     if auth.verify(&user.pass) {
         let stations = get_stations(&login, &mut db)?;
         Ok(Json(UserStationsResp {
@@ -222,6 +206,7 @@ fn user_stations_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiRe
 fn user_stations_post(login: String, req: Json<UserStationsReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
+
     if auth.verify(&user.pass) {
         let mut station = get_station(req.id, &mut db)?;
         if station.owner.is_none() {
@@ -233,6 +218,96 @@ fn user_stations_post(login: String, req: Json<UserStationsReq>, db: State<DbCon
         Err(Status::Unauthorized)
     }
 }
+
+#[get("/v1/users/<login>/stations/<id>")]
+fn user_station_get(login: String, id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StationResp> {
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
+    let user = get_user(&login, &mut db)?;
+    let station = get_station(id, &mut db)?;
+
+    if station.owner == Some(user.login) && auth.verify(&user.pass) {
+        Ok(Json(StationResp {
+            name: station.name,
+            owner: station.owner
+        }))
+    } else {
+        Err(Status::Unauthorized)
+    }
+}
+
+#[put("/v1/users/<login>/stations/<id>", data = "<req>")]
+fn user_station_put(login: String, id: usize, req: Json<StationReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
+    let user = get_user(&login, &mut db)?;
+    let mut station = get_station(id, &mut db)?;
+
+    if station.owner == Some(user.login) && auth.verify(&user.pass) {
+        station.name = req.name.clone();
+        update_station(station, &mut db)?;
+        Ok(Json(EmptyResp {}))
+    } else {
+        Err(Status::Unauthorized)
+    }
+}
+
+#[get("/v1/users/<login>/stations/<id>/data")]
+fn user_data_get(login: String, id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<DataResp> {
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
+    let user = get_user(&login, &mut db)?;
+    let station = get_station(id, &mut db)?;
+
+    if station.owner == Some(user.login) && auth.verify(&user.pass) {
+        let data = get_data(station.id, &mut db)?;
+        Ok(Json(DataResp {
+            data: data.into_iter().map(|d| DataElement {
+                time: d.time,
+                moisture: d.moisture,
+                temperature: d.temperature,
+                tank_empty: d.tank_empty
+            }).collect()
+        }))
+    } else {
+        Err(Status::Unauthorized)
+    }
+}
+
+#[get("/v1/users/<login>/stations/<id>/state")]
+fn user_state_get(login: String, id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StateResp> {
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
+    let user = get_user(&login, &mut db)?;
+    let station = get_station(id, &mut db)?;
+
+    if station.owner == Some(user.login) && auth.verify(&user.pass) {
+        Ok(Json(StateResp {
+            state: station.state
+        }))
+    } else {
+        Err(Status::Unauthorized)
+    }
+}
+
+#[put("/v1/users/<login>/stations/<id>/state", data = "<req>")]
+fn user_state_put(login: String, id: usize, req: Json<StateReq>, db: State<DbConn>, ws_reqs: State<WsRequests>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
+    let user = get_user(&login, &mut db)?;
+    let mut station = get_station(id, &mut db)?;
+
+    if station.owner == Some(user.login) && auth.verify(&user.pass) {
+        let mut ws_reqs = ws_reqs.lock().or(Err(Status::InternalServerError))?;
+        ws_reqs.push(WsRequest::UpdateState(WsUpdateState {
+            id: station.id,
+            state: req.state.clone()
+        }));
+
+        station.state = req.state.clone();
+        update_station(station, &mut db)?;
+
+        Ok(Json(EmptyResp {}))
+    } else {
+        Err(Status::Unauthorized)
+    }
+}
+
 
 #[catch(400)] 
 fn bad_request(_req: &Request) {}
@@ -254,7 +329,7 @@ fn server_error(_req: &Request) {}
 
 pub fn run(db_conn: DbConn, conf: Conf, ws_reqs: WsRequests) {
     rocket::ignite()
-        .mount("/", routes![index, options, root, stations_post, station_get, station_put, data_get, data_post, state_get, state_put, users_post, user_get, user_put, user_stations_get, user_stations_post])
+        .mount("/", routes![index, options, root, stations_post, station_get, station_put, data_post, state_get, state_put, users_post, user_get, user_put, user_stations_get, user_stations_post, user_station_get, user_station_put, user_data_get, user_state_get, user_state_put])
         .register(catchers![bad_request, unauthorised, not_found, conflict, unprocessable, server_error])
         .manage(db_conn).manage(conf).manage(ws_reqs).launch();
 }
