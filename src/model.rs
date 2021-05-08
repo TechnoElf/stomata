@@ -55,9 +55,7 @@ pub fn create_tables(db: &mut PooledConn) {
 }
 
 pub fn get_user(login: &str, db: &mut PooledConn) -> Result<UserRow, Status> {
-    let res = db.exec_first("SELECT * FROM users WHERE login = ?", (login,));
-    println!("{:?}", res);
-    Ok(res.or(Err(Status::InternalServerError))?
+    Ok(db.exec_first("SELECT * FROM users WHERE login = ?", (login,)).or(Err(Status::InternalServerError))?
         .map(|(login, name, pass)| UserRow { login, name, pass }).ok_or(Status::NotFound)?)
 }
 

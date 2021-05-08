@@ -18,6 +18,7 @@
 
 #![feature(decl_macro)]
 #![feature(proc_macro_hygiene)]
+#![feature(duration_consts_2)]
 
 use std::thread;
 use std::collections::HashMap;
@@ -31,6 +32,8 @@ mod apiv1;
 mod auth;
 mod model;
 mod ws_notifier;
+
+use ws_notifier::WsRequest;
 
 const CONFIG_FILE: &str = "/etc/stomata/conf.toml";
 
@@ -53,14 +56,19 @@ fn main() {
 
     let db = Arc::new(Mutex::new(db));
 
+    let reqs: Vec<WsRequest> = Vec::new();
+    let reqs = Arc::new(Mutex::new(reqs));
+
     let db_http = db.clone();
+    let reqs_http = reqs.clone();
     let http_server = thread::spawn(move || {
-        apiv1::run(db_http, conf);
+        apiv1::run(db_http, conf, reqs_http);
     });
 
     let db_ws = db.clone();
+    let reqs_ws = reqs.clone();
     let ws_server = thread::spawn(move || {
-        ws_notifier::run(db_ws);
+        ws_notifier::run(db_ws, reqs_ws);
     });
 
     http_server.join().unwrap();

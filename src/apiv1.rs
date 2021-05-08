@@ -30,10 +30,12 @@ use uuid::Uuid;
 
 use crate::model::*;
 use crate::auth::*;
+use crate::ws_notifier::*;
 
 type ApiResp<T> = Result<Json<T>, Status>;
 type DbConn = Arc<Mutex<Pool>>;
 type Conf = HashMap<String, String>;
+type WsRequests = Arc<Mutex<Vec<WsRequest>>>;
 
 #[get("/")]
 fn index() -> Redirect {
@@ -147,12 +149,19 @@ fn state_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<StateResp
 }
 
 #[put("/v1/stations/<id>/state", data = "<req>")]
-fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, ws_reqs: State<WsRequests>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let mut station = get_station(id, &mut db)?;
     if auth.verify(&station.token) || station.owner.as_ref().map(|o| Ok(auth.verify(&get_user(o, &mut db)?.pass))).unwrap_or(Ok(false))? {
+        let mut ws_reqs = ws_reqs.lock().or(Err(Status::InternalServerError))?;
+        ws_reqs.push(WsRequest::UpdateState(WsUpdateState {
+            id: station.id,
+            state: req.state.clone()
+        }));
+
         station.state = req.state.clone();
         update_station(station, &mut db)?;
+
         Ok(Json(EmptyResp {}))
     } else {
         Err(Status::Unauthorized)
@@ -169,11 +178,7 @@ fn users_post(req: Json<UsersReq>, db: State<DbConn>) -> ApiResp<EmptyResp> {
 
 #[get("/v1/users/<login>")]
 fn user_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserResp> {
-    let res = db.lock();
-    println!("{:?}", res);
-    let res = res.or(Err(Status::InternalServerError))?.get_conn();
-    println!("{:?}", res);
-    let mut db = res.or(Err(Status::InternalServerError))?;
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
     if auth.verify(&user.pass) {
         Ok(Json(UserResp {
@@ -247,9 +252,9 @@ fn unprocessable(_req: &Request) {}
 #[catch(500)] 
 fn server_error(_req: &Request) {}
 
-pub fn run(db_conn: DbConn, conf: Conf) {
+pub fn run(db_conn: DbConn, conf: Conf, ws_reqs: WsRequests) {
     rocket::ignite()
         .mount("/", routes![index, options, root, stations_post, station_get, station_put, data_get, data_post, state_get, state_put, users_post, user_get, user_put, user_stations_get, user_stations_post])
         .register(catchers![bad_request, unauthorised, not_found, conflict, unprocessable, server_error])
-        .manage(db_conn).manage(conf).launch();
+        .manage(db_conn).manage(conf).manage(ws_reqs).launch();
 }
