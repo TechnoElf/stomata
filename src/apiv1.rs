@@ -187,6 +187,24 @@ fn user_put(login: String, req: Json<UserReq>, db: State<DbConn>, auth: BasicAut
     }
 }
 
+#[delete("/v1/users/<login>")]
+fn user_delete(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
+    let user = get_user(&login, &mut db)?;
+
+    if auth.verify(&user.pass) {
+        for mut station in get_stations(&login, &mut db)?.into_iter() {
+            station.owner = None;
+            update_station(station, &mut db)?;
+        }
+
+        delete_user(user, &mut db)?;
+        Ok(Json(EmptyResp {}))
+    } else {
+        Err(Status::Unauthorized)
+    }
+}
+
 #[get("/v1/users/<login>/stations")]
 fn user_stations_get(login: String, db: State<DbConn>, auth: BasicAuth) -> ApiResp<UserStationsResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
@@ -243,6 +261,21 @@ fn user_station_put(login: String, id: usize, req: Json<StationReq>, db: State<D
 
     if station.owner == Some(user.login) && auth.verify(&user.pass) {
         station.name = req.name.clone();
+        update_station(station, &mut db)?;
+        Ok(Json(EmptyResp {}))
+    } else {
+        Err(Status::Unauthorized)
+    }
+}
+
+#[delete("/v1/users/<login>/stations/<id>")]
+fn user_station_delete(login: String, id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+    let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
+    let user = get_user(&login, &mut db)?;
+    let mut station = get_station(id, &mut db)?;
+
+    if station.owner == Some(user.login) && auth.verify(&user.pass) {
+        station.owner = None;
         update_station(station, &mut db)?;
         Ok(Json(EmptyResp {}))
     } else {
@@ -329,7 +362,7 @@ fn server_error(_req: &Request) {}
 
 pub fn run(db_conn: DbConn, conf: Conf, ws_reqs: WsRequests) {
     rocket::ignite()
-        .mount("/", routes![index, options, root, stations_post, station_get, station_put, data_post, state_get, state_put, users_post, user_get, user_put, user_stations_get, user_stations_post, user_station_get, user_station_put, user_data_get, user_state_get, user_state_put])
+        .mount("/", routes![index, options, root, stations_post, station_get, station_put, data_post, state_get, state_put, users_post, user_get, user_put, user_delete, user_stations_get, user_stations_post, user_station_get, user_station_put, user_station_delete, user_data_get, user_state_get, user_state_put])
         .register(catchers![bad_request, unauthorised, not_found, conflict, unprocessable, server_error])
         .manage(db_conn).manage(conf).manage(ws_reqs).launch();
 }

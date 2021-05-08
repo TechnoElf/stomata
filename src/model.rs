@@ -94,6 +94,10 @@ pub fn add_data(station: usize, moisture: isize, temperature: f32, tank_empty: b
     Ok(db.exec_drop("INSERT INTO data (station, time, moisture, temperature, tank_empty) VALUES (?, ?, ?, ?, ?)", (station, SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), moisture, temperature, tank_empty)).or(Err(Status::InternalServerError))?)
 }
 
+pub fn delete_user(user: UserRow, db: &mut PooledConn) -> Result<(), Status> {
+    Ok(db.exec_drop("DELETE FROM users WHERE login = ?", (&user.login,)).or(Err(Status::InternalServerError))?)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct StationsReq {
     pub id: usize,
