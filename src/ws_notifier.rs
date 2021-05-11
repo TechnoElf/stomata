@@ -18,6 +18,7 @@
 
 use std::sync::{Mutex, Arc};
 use std::time::{Duration, Instant};
+use std::cmp::Ordering;
 
 use mysql::Pool;
 use serde::{Deserialize, Serialize};
@@ -51,9 +52,38 @@ pub fn run(db_conn: Arc<Mutex<Pool>>, reqs: Arc<Mutex<Vec<WsRequest>>>) {
             println!("[WS]: Connection from {}", addr);
         }
 
-        std::thread::sleep(Duration::new(5, 0));
-
         stations = stations.into_iter().filter_map(|s| process_rx(s, db_conn.clone())).collect();
+        stations.sort_by(|a, b| {
+            if let Some(a_id) = a.id {
+                if let Some(b_id) = b.id {
+                    if a_id == b_id {
+                        b.last_seen.cmp(&a.last_seen)
+                    } else {
+                        b_id.cmp(&a_id)
+                    }
+                } else {
+                    Ordering::Less
+                }
+            } else {
+                Ordering::Greater
+            }
+        });
+        stations.dedup_by(|a, b| {
+            if let Some(a_id) = a.id {
+                if let Some(b_id) = b.id {
+                    if a_id == b_id {
+                        println!("[WS]: Station {:?} disconnected (duplication)", b.id);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        });
 
         let reqs = std::mem::replace(reqs.lock().unwrap().as_mut(), Vec::new());
         for r in reqs.into_iter() {
@@ -62,6 +92,14 @@ pub fn run(db_conn: Arc<Mutex<Pool>>, reqs: Arc<Mutex<Vec<WsRequest>>>) {
                     if let Some(station) = stations.iter_mut().find(|s| s.id == Some(r.id)) {
                         let msg = OwnedMessage::Text(serde_json::to_string(&StateMessage {
                             state: r.state
+                        }).unwrap());
+                        station.cli.send_message(&msg).unwrap();
+                    }
+                },
+                WsRequest::UpdateConf(r) => {
+                    if let Some(station) = stations.iter_mut().find(|s| s.id == Some(r.id)) {
+                        let msg = OwnedMessage::Text(serde_json::to_string(&ConfMessage {
+                            conf: r.conf
                         }).unwrap());
                         station.cli.send_message(&msg).unwrap();
                     }
@@ -78,6 +116,7 @@ fn process_rx(mut station: Station, db_conn: Arc<Mutex<Pool>>) -> Option<Station
             OwnedMessage::Close(_) => {
                 let msg = OwnedMessage::Close(None);
                 station.cli.send_message(&msg).unwrap();
+                println!("[WS]: Station {:?} disconnected (close)", station.id);
                 return None;
             }
             OwnedMessage::Ping(ping) => {
@@ -108,7 +147,7 @@ fn process_rx(mut station: Station, db_conn: Arc<Mutex<Pool>>) -> Option<Station
     if station.last_seen.elapsed() < ALIVE_TIMEOUT {
         Some(station)
     } else {
-        println!("[WS]: Station {:?} disconnected", station.id);
+        println!("[WS]: Station {:?} disconnected (timeout)", station.id);
         None
     }
 }
@@ -130,11 +169,22 @@ struct StateMessage {
     state: String
 }
 
+#[derive(Debug, Serialize)]
+struct ConfMessage {
+    conf: String
+}
+
 pub enum WsRequest {
-    UpdateState(WsUpdateState)
+    UpdateState(WsUpdateState),
+    UpdateConf(WsUpdateConf)
 }
 
 pub struct WsUpdateState {
     pub id: usize,
     pub state: String
+}
+
+pub struct WsUpdateConf {
+    pub id: usize,
+    pub conf: String
 }

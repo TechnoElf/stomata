@@ -69,7 +69,7 @@ fn stations_post(req: Json<StationsReq>, db: State<DbConn>) -> ApiResp<StationsR
     if get_station(req.id, &mut db).is_err() {
         let token = Uuid::new_v4().to_simple().encode_lower(&mut Uuid::encode_buffer()).to_string();
         let hash = BasicAuth::from_parts(&req.id.to_string(), &token).hash();
-        add_station(req.id, &req.name, &hash, &mut db)?;
+        add_station(req.id, req.name.as_ref().unwrap_or(&req.id.to_string()), &hash, &mut db)?;
         Ok(Json(StationsResp {
             token
         }))
@@ -86,7 +86,8 @@ fn station_get(id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<Station
     if auth.verify(&station.token) {
         Ok(Json(StationResp {
             name: station.name,
-            owner: station.owner
+            owner: station.owner,
+            conf: station.conf.unwrap_or("{}".to_string())
         }))
     } else {
         Err(Status::Unauthorized)
@@ -99,7 +100,12 @@ fn station_put(id: usize, req: Json<StationReq>, db: State<DbConn>, auth: BasicA
     let mut station = get_station(id, &mut db)?;
 
     if auth.verify(&station.token) {
-        station.name = req.name.clone();
+        if let Some(name) = req.name.clone() {
+            station.name = name;
+        }
+        if let Some(conf) = req.conf.clone() {
+            station.conf = Some(conf);
+        }
         update_station(station, &mut db)?;
         Ok(Json(EmptyResp {}))
     } else {
@@ -246,7 +252,8 @@ fn user_station_get(login: String, id: usize, db: State<DbConn>, auth: BasicAuth
     if station.owner == Some(user.login) && auth.verify(&user.pass) {
         Ok(Json(StationResp {
             name: station.name,
-            owner: station.owner
+            owner: station.owner,
+            conf: station.conf.unwrap_or("{}".to_string())
         }))
     } else {
         Err(Status::Unauthorized)
@@ -254,13 +261,24 @@ fn user_station_get(login: String, id: usize, db: State<DbConn>, auth: BasicAuth
 }
 
 #[put("/v1/users/<login>/stations/<id>", data = "<req>")]
-fn user_station_put(login: String, id: usize, req: Json<StationReq>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<EmptyResp> {
+fn user_station_put(login: String, id: usize, req: Json<StationReq>, db: State<DbConn>, ws_reqs: State<WsRequests>, auth: BasicAuth) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
     let mut station = get_station(id, &mut db)?;
 
     if station.owner == Some(user.login) && auth.verify(&user.pass) {
-        station.name = req.name.clone();
+        if let Some(name) = req.name.clone() {
+            station.name = name;
+        }
+        if let Some(conf) = req.conf.clone() {
+            station.conf = Some(conf.clone());
+
+            let mut ws_reqs = ws_reqs.lock().or(Err(Status::InternalServerError))?;
+            ws_reqs.push(WsRequest::UpdateConf(WsUpdateConf {
+                id: station.id,
+                conf
+            }));
+        }
         update_station(station, &mut db)?;
         Ok(Json(EmptyResp {}))
     } else {

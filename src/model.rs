@@ -36,7 +36,8 @@ pub struct StationRow {
     pub name: String,
     pub state: String,
     pub owner: Option<String>,
-    pub token: String
+    pub token: String,
+    pub conf: Option<String>
 }
 
 #[derive(Debug)]
@@ -50,7 +51,7 @@ pub struct DataRow {
 
 pub fn create_tables(db: &mut PooledConn) {
     db.query_drop("CREATE TABLE IF NOT EXISTS users (login TEXT NOT NULL, name TEXT NOT NULL, pass TEXT NOT NULL)").unwrap();
-    db.query_drop("CREATE TABLE IF NOT EXISTS stations (id INT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, owner TEXT, token TEXT NOT NULL)").unwrap();
+    db.query_drop("CREATE TABLE IF NOT EXISTS stations (id INT NOT NULL, name TEXT NOT NULL, state TEXT NOT NULL, owner TEXT, token TEXT NOT NULL, conf TEXT)").unwrap();
     db.query_drop("CREATE TABLE IF NOT EXISTS data (station INT NOT NULL, time INT NOT NULL, moisture INT NOT NULL, temperature FLOAT NOT NULL, tank_empty BOOL NOT NULL)").unwrap();
 }
 
@@ -61,12 +62,12 @@ pub fn get_user(login: &str, db: &mut PooledConn) -> Result<UserRow, Status> {
 
 pub fn get_station(id: usize, db: &mut PooledConn) -> Result<StationRow, Status> {
     Ok(db.exec_first("SELECT * FROM stations WHERE id = ?", (id,)).or(Err(Status::InternalServerError))?
-        .map(|(id, name, state, owner, token)| StationRow { id, name, state, owner, token }).ok_or(Status::NotFound)?)
+        .map(|(id, name, state, owner, token, conf)| StationRow { id, name, state, owner, token, conf }).ok_or(Status::NotFound)?)
 }
 
 pub fn get_stations(owner: &str, db: &mut PooledConn) -> Result<Vec<StationRow>, Status> {
     Ok(db.exec("SELECT * FROM stations WHERE owner = ?", (owner,)).or(Err(Status::InternalServerError))?
-        .into_iter().map(|(id, name, state, owner, token)| StationRow { id, name, state, owner, token }).collect())
+        .into_iter().map(|(id, name, state, owner, token, conf)| StationRow { id, name, state, owner, token, conf }).collect())
 }
 
 pub fn get_data(station: usize, db: &mut PooledConn) -> Result<Vec<DataRow>, Status> {
@@ -79,7 +80,7 @@ pub fn update_user(user: UserRow, db: &mut PooledConn) -> Result<(), Status> {
 }
 
 pub fn update_station(station: StationRow, db: &mut PooledConn) -> Result<(), Status> {
-    Ok(db.exec_drop("UPDATE stations SET name = ?, state = ?, owner = ?, token = ? WHERE id = ?", (&station.name, &station.state, &station.owner, &station.token, station.id)).or(Err(Status::InternalServerError))?)
+    Ok(db.exec_drop("UPDATE stations SET name = ?, state = ?, owner = ?, token = ?, conf = ? WHERE id = ?", (&station.name, &station.state, &station.owner, &station.token, &station.conf, station.id)).or(Err(Status::InternalServerError))?)
 }
 
 pub fn add_user(login: &str, name: &str, pass: &str, db: &mut PooledConn) -> Result<(), Status> {
@@ -101,12 +102,13 @@ pub fn delete_user(user: UserRow, db: &mut PooledConn) -> Result<(), Status> {
 #[derive(Debug, Deserialize)]
 pub struct StationsReq {
     pub id: usize,
-    pub name: String
+    pub name: Option<String>
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StationReq {
-    pub name: String
+    pub name: Option<String>,
+    pub conf: Option<String>
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,7 +152,8 @@ pub struct StationsResp {
 #[derive(Debug, Serialize)]
 pub struct StationResp {
     pub name: String,
-    pub owner: Option<String>
+    pub owner: Option<String>,
+    pub conf: String
 }
 
 #[derive(Debug, Serialize)]
