@@ -148,7 +148,6 @@ fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, auth: BasicAuth)
     if auth.verify(&station.token) {
         station.state = req.state.clone();
         update_station(station, &mut db)?;
-
         Ok(Json(EmptyResp {}))
     } else {
         Err(Status::Unauthorized)
@@ -158,9 +157,14 @@ fn state_put(id: usize, req: Json<StateReq>, db: State<DbConn>, auth: BasicAuth)
 #[post("/v1/users", data = "<req>")]
 fn users_post(req: Json<UsersReq>, db: State<DbConn>) -> ApiResp<EmptyResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
-    let hash = BasicAuth::from_parts(&req.login, &req.pass).hash();
-    add_user(&req.login, &req.name, &hash, &mut db)?;
-    Ok(Json(EmptyResp {}))
+
+    if get_user(&req.login, &mut db).is_err() {
+        let hash = BasicAuth::from_parts(&req.login, &req.pass).hash();
+        add_user(&req.login, &req.name, &hash, &mut db)?;
+        Ok(Json(EmptyResp {}))
+    } else {
+        Err(Status::Conflict)
+    }
 }
 
 #[get("/v1/users/<login>")]
@@ -272,7 +276,6 @@ fn user_station_put(login: String, id: usize, req: Json<StationReq>, db: State<D
         }
         if let Some(conf) = req.conf.clone() {
             station.conf = Some(conf.clone());
-
             let mut ws_reqs = ws_reqs.lock().or(Err(Status::InternalServerError))?;
             ws_reqs.push(WsRequest::UpdateConf(WsUpdateConf {
                 id: station.id,
