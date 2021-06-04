@@ -119,7 +119,7 @@ fn data_post(id: usize, req: Json<DataReq>, db: State<DbConn>, auth: BasicAuth) 
     let station = get_station(id, &mut db)?;
 
     if auth.verify(&station.token) {
-        add_data(station.id, req.moisture, req.temperature, req.tank_empty, &mut db)?;
+        add_data(station.id, req.moisture, req.temperature, req.humidity, req.tank_fill, &mut db)?;
         Ok(Json(EmptyResp {}))
     } else {
         Err(Status::Unauthorized)
@@ -317,7 +317,8 @@ fn user_data_get(login: String, id: usize, db: State<DbConn>, auth: BasicAuth) -
                 time: d.time,
                 moisture: d.moisture,
                 temperature: d.temperature,
-                tank_empty: d.tank_empty
+                humidity: d.humidity,
+                tank_fill: d.tank_fill
             }).collect()
         }))
     } else {
