@@ -76,6 +76,11 @@ pub fn get_data(station: usize, db: &mut PooledConn) -> Result<Vec<DataRow>, Sta
         .into_iter().map(|(station, time, moisture, temperature, humidity, tank_fill)| DataRow { station, time, moisture, temperature, humidity, tank_fill }).collect())
 }
 
+pub fn get_data_count(station: usize, count: usize, db: &mut PooledConn) -> Result<Vec<DataRow>, Status> {
+    Ok(db.exec("SELECT * FROM data WHERE station = ? ORDER BY time DESC LIMIT ?", (station, count)).or(Err(Status::InternalServerError))?
+        .into_iter().map(|(station, time, moisture, temperature, humidity, tank_fill)| DataRow { station, time, moisture, temperature, humidity, tank_fill }).collect())
+}
+
 pub fn update_user(user: UserRow, db: &mut PooledConn) -> Result<(), Status> {
     Ok(db.exec_drop("UPDATE users SET name = ?, pass = ? WHERE login = ?", (&user.name, &user.pass, &user.login)).or(Err(Status::InternalServerError))?)
 }

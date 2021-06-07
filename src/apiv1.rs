@@ -304,14 +304,19 @@ fn user_station_delete(login: String, id: usize, db: State<DbConn>, auth: BasicA
     }
 }
 
-#[get("/v1/users/<login>/stations/<id>/data")]
-fn user_data_get(login: String, id: usize, db: State<DbConn>, auth: BasicAuth) -> ApiResp<DataResp> {
+#[get("/v1/users/<login>/stations/<id>/data?<count>")]
+fn user_data_get(login: String, id: usize, count: Option<usize>, db: State<DbConn>, auth: BasicAuth) -> ApiResp<DataResp> {
     let mut db = db.lock().or(Err(Status::InternalServerError))?.get_conn().or(Err(Status::InternalServerError))?;
     let user = get_user(&login, &mut db)?;
     let station = get_station(id, &mut db)?;
 
     if station.owner == Some(user.login) && auth.verify(&user.pass) {
-        let data = get_data(station.id, &mut db)?;
+        let data = if let Some(count) = count {
+            get_data_count(station.id, count, &mut db)?
+        } else {
+            get_data(station.id, &mut db)?
+        };
+
         Ok(Json(DataResp {
             data: data.into_iter().map(|d| DataElement {
                 time: d.time,
